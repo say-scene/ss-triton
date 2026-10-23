@@ -1,1 +1,1 @@
-# ss_triton
+# ss-triton
