@@ -1,0 +1,53 @@
+name: ecr-push
+
+# 1차 초안: 수동 실행만 허용. 러너·베이스 이미지 검증 후 main push 연동을 결정한다.
+on:
+  workflow_dispatch:
+    inputs:
+      triton_base_image:
+        description: 'Triton 베이스 이미지 고정 태그 (초기 선택: 26.09 / CUDA 13.4.1)'
+        default: 'nvcr.io/nvidia/tritonserver:26.09-vllm-python-py3'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: triton-ecr-push
+  cancel-in-progress: false
+
+jobs:
+  push:
+    if: github.ref == 'refs/heads/main'
+    # GitHub-hosted 임시 구성. EC2 runner 전환은 미확정이다.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate base image
+        env:
+          TRITON_BASE_IMAGE: ${{ inputs.triton_base_image }}
+        run: |
+          [[ "$TRITON_BASE_IMAGE" =~ ^nvcr.io/nvidia/tritonserver:[0-9]{2}\.[0-9]{2}-vllm-python-py3$ ]]
+          bash -n entrypoint.sh
+          python3 -m json.tool model_repository/qwen3_8b/1/model.json > /dev/null
+      - uses: docker/setup-buildx-action@v3
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ap-northeast-2
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Build and push Triton image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          TRITON_BASE_IMAGE: ${{ inputs.triton_base_image }}
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg "TRITON_BASE_IMAGE=$TRITON_BASE_IMAGE" \
+            --tag "$REGISTRY/ss-triton:${GITHUB_SHA::7}" \
+            --push .

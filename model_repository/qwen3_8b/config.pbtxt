@@ -1,0 +1,4 @@
+name: "qwen3_8b"
+backend: "vllm"
+instance_group [{ count: 1 kind: KIND_MODEL }]
+model_transaction_policy { decoupled: true }
