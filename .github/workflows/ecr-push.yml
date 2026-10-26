@@ -1,7 +1,9 @@
 name: ecr-push
 
-# 1차 초안: 수동 실행만 허용. 러너·베이스 이미지 검증 후 main push 연동을 결정한다.
+# main 반영 시 자동 빌드하며 수동 실행도 지원한다.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       triton_base_image:
@@ -20,7 +22,7 @@ concurrency:
 jobs:
   push:
     if: github.ref == 'refs/heads/main'
-    # GitHub-hosted 임시 구성. EC2 runner 전환은 미확정이다.
+    # 사용자 결정: GitHub 제공 Ubuntu VM 실행기로 빌드한다. GPU는 필요하지 않다.
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -29,7 +31,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate base image
         env:
-          TRITON_BASE_IMAGE: ${{ inputs.triton_base_image }}
+          TRITON_BASE_IMAGE: ${{ inputs.triton_base_image || 'nvcr.io/nvidia/tritonserver:26.09-vllm-python-py3' }}
         run: |
           [[ "$TRITON_BASE_IMAGE" =~ ^nvcr.io/nvidia/tritonserver:[0-9]{2}\.[0-9]{2}-vllm-python-py3$ ]]
           bash -n entrypoint.sh
@@ -44,7 +46,7 @@ jobs:
       - name: Build and push Triton image
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
-          TRITON_BASE_IMAGE: ${{ inputs.triton_base_image }}
+          TRITON_BASE_IMAGE: ${{ inputs.triton_base_image || 'nvcr.io/nvidia/tritonserver:26.09-vllm-python-py3' }}
         run: |
           docker buildx build \
             --platform linux/amd64 \
