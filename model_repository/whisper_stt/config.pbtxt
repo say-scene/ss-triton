@@ -1,0 +1,7 @@
+name: "whisper_stt"
+backend: "python"
+max_batch_size: 0
+input [{ name: "AUDIO" data_type: TYPE_STRING dims: [1] }]
+output [{ name: "TEXT" data_type: TYPE_STRING dims: [1] }]
+# Whisper 로더가 직접 GPU를 사용하며, Triton 입출력 텐서는 CPU에 둔다.
+instance_group [{ count: 1 kind: KIND_CPU }]
