@@ -1,7 +1,5 @@
 # 빌드 입력은 명시한 코드·설정만 허용한다. 가중치·개인키·로컬 venv 제외.
 **
 !Dockerfile
-!entrypoint.sh
-!healthcheck.py
-!model_repository/
-!model_repository/**
+!requirements.txt
+!whisper_server.py

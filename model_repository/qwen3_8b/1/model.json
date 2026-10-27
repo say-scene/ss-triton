@@ -1,6 +1,0 @@
-{
-  "model": "/opt/models/Qwen3-8B-FP8",
-  "gpu_memory_utilization": 0.6,
-  "max_model_len": 4096,
-  "enable_prefix_caching": true
-}
