@@ -1,14 +1,11 @@
 name: ecr-push
 
-# 1차 초안: 수동 실행만 허용. 러너·베이스 이미지 검증 후 main push 연동을 결정한다.
+# main 반영 시 자동 빌드하며 수동 실행도 지원한다.
+# 이름은 ss-triton이지만 CPU Whisper STT 이미지를 만든다(Triton 원본: tag triton-gpu-v1).
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      triton_base_image:
-        description: 'Triton 베이스 이미지 고정 태그 (초기 선택: 26.09 / CUDA 13.4.1)'
-        default: 'nvcr.io/nvidia/tritonserver:26.09-vllm-python-py3'
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -20,20 +17,15 @@ concurrency:
 jobs:
   push:
     if: github.ref == 'refs/heads/main'
-    # GitHub-hosted 임시 구성. EC2 runner 전환은 미확정이다.
+    # 사용자 결정: GitHub 제공 Ubuntu VM 실행기로 빌드한다. GPU는 필요하지 않다.
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v4
-      - name: Validate base image
-        env:
-          TRITON_BASE_IMAGE: ${{ inputs.triton_base_image }}
-        run: |
-          [[ "$TRITON_BASE_IMAGE" =~ ^nvcr.io/nvidia/tritonserver:[0-9]{2}\.[0-9]{2}-vllm-python-py3$ ]]
-          bash -n entrypoint.sh
-          python3 -m json.tool model_repository/qwen3_8b/1/model.json > /dev/null
+      - name: Validate STT server
+        run: python3 -m py_compile whisper_server.py
       - uses: docker/setup-buildx-action@v3
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -41,13 +33,71 @@ jobs:
           aws-region: ap-northeast-2
       - id: ecr
         uses: aws-actions/amazon-ecr-login@v2
-      - name: Build and push Triton image
+      - name: Build and push STT image
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
-          TRITON_BASE_IMAGE: ${{ inputs.triton_base_image }}
         run: |
           docker buildx build \
             --platform linux/amd64 \
-            --build-arg "TRITON_BASE_IMAGE=$TRITON_BASE_IMAGE" \
             --tag "$REGISTRY/ss-triton:${GITHUB_SHA::7}" \
             --push .
+
+  # AWS OIDC의 브랜치 sub를 유지하도록 environment는 이 job에만 지정한다.
+  update-tag:
+    needs: push
+    runs-on: ubuntu-latest
+    environment: ss-k8s-write
+    steps:
+      - id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.SS_K8S_APP_ID }}
+          private-key: ${{ secrets.SS_K8S_APP_PRIVATE_KEY }}
+          owner: say-scene
+          repositories: ss-k8s
+          permission-contents: write
+      - uses: actions/checkout@v4
+        with:
+          repository: say-scene/ss-k8s
+          ref: main
+          token: ${{ steps.app.outputs.token }}
+      - name: Update Triton image tag
+        env:
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          path = Path('apps/ss-triton/kustomization.yaml')
+          text = path.read_text(encoding='utf-8')
+          # 현재는 Triton 이미지 하나만 있는 파일이다. 구조 변경 시 오수정을 막는다.
+          if re.findall(r'^  - name: (.+)$', text, re.MULTILINE) != ['ss-triton']:
+              raise SystemExit('Triton 이미지 설정 구조를 확인해주세요.')
+          tag = os.environ['GITHUB_SHA'][:7]
+          if not re.fullmatch(r'[0-9a-f]{7}', tag):
+              raise SystemExit('유효하지 않은 commit SHA입니다.')
+          text, count = re.subn(r'^(    newTag:).*$',
+                                lambda match: f'{match[1]} "{tag}"', text, flags=re.MULTILINE)
+          if count != 1:
+              raise SystemExit('newTag 항목이 정확히 하나여야 합니다.')
+          path.write_text(text, encoding='utf-8')
+          PY
+          git add -- apps/ss-triton/kustomization.yaml
+          if git diff --cached --quiet -- apps/ss-triton/kustomization.yaml; then
+            exit 0
+          fi
+          git config user.name "$APP_SLUG[bot]"
+          git config user.email "$APP_SLUG[bot]@users.noreply.github.com"
+          git commit -m "ss-triton 이미지 태그 ${GITHUB_SHA::7}로 갱신"
+          # BE 태그 갱신 등 다른 파일의 동시 커밋을 받아 재시도한다.
+          for attempt in 1 2 3; do
+            git pull --rebase origin main
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "ss-k8s 태그 push에 실패했습니다. 최신 커밋과 권한을 확인해주세요." >&2
+          exit 1
