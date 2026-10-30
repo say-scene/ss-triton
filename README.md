@@ -24,7 +24,7 @@
 
 | 변수 | 이미지 기본값 | 설명 |
 |---|---|---|
-| `WHISPER_MODEL` | `small.en` | 비교 시 `large-v3-turbo` 등으로 바꾼다 |
+| `WHISPER_MODEL` | `/models/small.en` | 이미지에 넣은 `small.en` 경로. 이름(예: `large-v3-turbo`)을 주면 기동 시 HF에서 받는다 |
 | `WHISPER_CPU_THREADS` | `2` | CPU limit과 맞춘다 |
 | `STT_CONCURRENCY` | `1` | 동시 계산 수(faster-whisper `num_workers`) |
 | `STT_QUEUE_TIMEOUT` | `10` | 슬롯 대기 상한(초). 넘으면 503 `STT_BUSY` |
