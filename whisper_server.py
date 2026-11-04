@@ -23,6 +23,8 @@ MODEL = None
 SLOTS = threading.BoundedSemaphore(CONCURRENCY)
 
 REQUESTS = Counter('stt_requests_total', 'STT 요청 결과', ['result'])
+# 기동 시 0으로 만들어 둔다. 첫 증가 때 생긴 시계열은 rate()가 그 증가분을 세지 못한다.
+for r in ('ok', 'busy', 'invalid', 'failed'): REQUESTS.labels(r)
 QUEUE_WAIT = Histogram('stt_queue_wait_seconds', '처리 슬롯 대기 시간',
                        buckets=(0.05, 0.25, 0.5, 1, 2, 3, 5, 10))
 INFERENCE = Histogram('stt_inference_seconds', 'Whisper 처리 시간',
